@@ -1,4 +1,6 @@
 import streamlit as st
+
+st.write('Hello Joris')
 import requests
 import plotly.graph_objects as go
 from datetime import datetime
