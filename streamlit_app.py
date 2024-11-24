@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # Weather API setup
-api_key = "be605a1125674db58dc221827241311"  # Replace with your API key
+api_key = "e141e82474c84a9f9eb114305242211"  # Replace with your API key
 location = "Eindhoven"
 
 # Fetch weather data
