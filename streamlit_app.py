@@ -1,21 +1,14 @@
-from dotenv import load_dotenv
-import os
 import streamlit as st
 import requests
 import plotly.graph_objects as go
 from datetime import datetime
 
-def configure():
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-    load_dotenv(dotenv_path)
-
-# Configure and load the API Key
-configure()
+api_key = st.secrets['api_key']
 # Weather API setup
 location = "Eindhoven"
 
 # Fetch weather data
-url = f"http://api.weatherapi.com/v1/forecast.json?key={os.getenv('api_key')}&q={location}&days=2"
+url = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q={location}&days=2"
 response = requests.get(url)
 data = response.json()
 
