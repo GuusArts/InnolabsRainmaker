@@ -1,9 +1,22 @@
+from dotenv import load_dotenv
+import os
 import streamlit as st
 import requests
 import plotly.graph_objects as go
 from datetime import datetime
 
-api_key = st.secrets['api_key']
+def configure():
+    """Load API key from .env file."""
+    load_dotenv()
+
+# First, attempt to configure using .env
+configure()
+api_key = os.getenv('api_key')
+
+# Fallback to st.secrets if .env configuration does not provide an API key
+if not api_key:
+    api_key = st.secrets.get('api_key')
+
 # Weather API setup
 location = "Eindhoven"
 
