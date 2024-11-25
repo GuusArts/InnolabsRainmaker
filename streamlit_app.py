@@ -6,7 +6,8 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 def configure():
-    load_dotenv()
+    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    load_dotenv(dotenv_path)
 
 # Configure and load the API Key
 configure()
