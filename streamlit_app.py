@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 import plotly.graph_objects as go
 from datetime import datetime
+import pandas as pd
 
 def configure():
     """Load API key from .env file."""
@@ -24,6 +25,7 @@ location = "Eindhoven"
 url = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q={location}&days=2"
 response = requests.get(url)
 data = response.json()
+
 
 # Check if 'forecast' exists in the response
 if 'forecast' not in data or 'forecastday' not in data['forecast']:
@@ -56,6 +58,13 @@ min_temp_today = min(temperatures_today)
 max_temp_today = max(temperatures_today)
 min_temp_time_today = times_today[temperatures_today.index(min_temp_today)]
 max_temp_time_today = times_today[temperatures_today.index(max_temp_today)]
+
+
+max_humidity = max(humidity)
+min_humidity = min(humidity)
+max_time = times_today[humidity.index(max_humidity)]
+min_time = times_today[humidity.index(min_humidity)]
+
 
 # Clothing recommendations based on average temperature
 if avg_temp_today < 7:
@@ -106,6 +115,41 @@ temp_chart.update_layout(
     template="plotly_white",
 )
 
+# Create interactive line chart for the current day's forecast
+hum_chart = go.Figure()
+hum_chart.add_trace(go.Scatter(x=times_today, y=humidity, mode='lines+markers', name='Humidity (%)', line=dict(color='blue')))
+
+
+
+hum_chart.add_trace(go.Scatter(
+    x=[max_time],
+    y=[max_humidity],
+    mode='markers',
+    marker=dict(color='green', size=10),
+    name='Highest Humidity'
+))
+hum_chart.add_trace(go.Scatter(
+    x=[min_time],
+    y=[min_humidity],
+    mode='markers',
+    marker=dict(color='red', size=10),
+    name='Lowest Humidity'
+))
+
+
+
+hum_chart.update_layout(
+    title="Humidity Trend Throughout the Day (Today)",
+    xaxis_title="Time",
+    yaxis_title="Humidity %",
+    legend_title="Legend",
+    template="plotly_white",
+)
+
+
+
+
+
 # Display the Streamlit app
 st.title("Eindhoven Weather Dashboard")
 st.subheader(f"Date: {current_day_forecast['date']}")
@@ -114,6 +158,9 @@ st.metric("Average Feels Like Temperature (Today)", f"{avg_feels_like_today:.2f}
 st.info(f"Clothing Suggestion: {suggestion}")
 
 st.plotly_chart(temp_chart, use_container_width=True)
+st.plotly_chart(hum_chart, use_container_width=True)
+
+
 
 st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
 st.dataframe({
