@@ -223,25 +223,63 @@ forecast_rain_chart.update_layout(
     template="plotly_white"
 )
 
-# Streamlit app layout
+# # Streamlit app layout
+# st.title("Eindhoven Weather Dashboard")
+
+# # Display today's weather
+# st.subheader(f"Today's Weather ({current_day_forecast['date']})")
+# st.metric("Average Temperature", f"{avg_temp_today:.2f}°C")
+# st.metric("Average Feels Like Temperature", f"{avg_feels_like_today:.2f}°C")
+# st.metric("Total Rainfall (Today)", f"{total_rainfall_today:.2f} mm")
+# st.metric("Peak Rainfall Time (Today)", f"{peak_rainfall_time_today}")
+# st.info(f"Clothing Suggestion: {suggestion}")
+
+# # Charts
+# st.plotly_chart(temp_chart, use_container_width=True)
+# st.plotly_chart(hum_chart, use_container_width=True)
+# st.plotly_chart(rain_chart, use_container_width=True)
+# st.plotly_chart(forecast_rain_chart, use_container_width=True)
+# st.plotly_chart(historical_chart, use_container_width=True)
+
+# # Display tomorrow's forecast
+# st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
+# st.dataframe({
+#     "Time": times_tomorrow,
+#     "Temperature (°C)": temperatures_tomorrow,
+#     "Feels Like (°C)": feels_like_tomorrow,
+#     "Precipitation (mm)": precipitation,
+#     "Humidity (%)": humidity,
+#     "Wind Speed (km/h)": wind_speed
+# })
+
 st.title("Eindhoven Weather Dashboard")
 
-# Display today's weather
+# Display today's weather in a grid
 st.subheader(f"Today's Weather ({current_day_forecast['date']})")
-st.metric("Average Temperature", f"{avg_temp_today:.2f}°C")
-st.metric("Average Feels Like Temperature", f"{avg_feels_like_today:.2f}°C")
-st.metric("Total Rainfall (Today)", f"{total_rainfall_today:.2f} mm")
-st.metric("Peak Rainfall Time (Today)", f"{peak_rainfall_time_today}")
-st.info(f"Clothing Suggestion: {suggestion}")
+col1, col2, col3 = st.columns(3)  # Create a three-column layout
 
-# Charts
-st.plotly_chart(temp_chart, use_container_width=True)
-st.plotly_chart(hum_chart, use_container_width=True)
-st.plotly_chart(rain_chart, use_container_width=True)
-st.plotly_chart(forecast_rain_chart, use_container_width=True)
-st.plotly_chart(historical_chart, use_container_width=True)
+with col1:
+    st.metric("Average Temperature", f"{avg_temp_today:.2f}°C")
+    st.metric("Peak Rainfall Time (Today)", f"{peak_rainfall_time_today}")
 
-# Display tomorrow's forecast
+with col2:
+    st.metric("Average Feels Like Temperature", f"{avg_feels_like_today:.2f}°C")
+    st.metric("Total Rainfall (Today)", f"{total_rainfall_today:.2f} mm")
+
+with col3:
+    st.info(f"Clothing Suggestion: {suggestion}")
+
+# Display the charts in a grid
+st.subheader("Weather Trends")
+
+# Create a two-column layout for the charts
+col4, col5 = st.columns(2)
+
+with col4:
+    st.plotly_chart(temp_chart, use_container_width=True)
+    st.plotly_chart(rain_chart, use_container_width=True)
+
+# Display tomorrow's forecast in a grid
 st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
 st.dataframe({
     "Time": times_tomorrow,
@@ -250,4 +288,16 @@ st.dataframe({
     "Precipitation (mm)": precipitation,
     "Humidity (%)": humidity,
     "Wind Speed (km/h)": wind_speed
-})
+}, use_container_width=True)
+
+with col5:
+    st.plotly_chart(hum_chart, use_container_width=True)
+    st.plotly_chart(forecast_rain_chart, use_container_width=True)
+
+    ##historical_chart all alone in one grid
+
+
+
+# Display the forecasted rainfall chart below
+st.plotly_chart(historical_chart, use_container_width=True)
+
