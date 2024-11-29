@@ -3,14 +3,13 @@ import os
 import streamlit as st
 import requests
 import plotly.graph_objects as go
-from datetime import datetime
-import pandas as pd
+from datetime import datetime, timedelta
 
+# Load environment variables
 def configure():
     """Load API key from .env file."""
     load_dotenv()
 
-# First, attempt to configure using .env
 configure()
 api_key = os.getenv('api_key')
 
@@ -21,23 +20,50 @@ if not api_key:
 # Weather API setup
 location = "Eindhoven"
 
-# Fetch weather data
+# Fetch forecast data
 url = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q={location}&days=2"
 response = requests.get(url)
 data = response.json()
-
 
 # Check if 'forecast' exists in the response
 if 'forecast' not in data or 'forecastday' not in data['forecast']:
     st.error("Invalid response: 'forecast' data is missing")
     st.stop()
 
+# Retrieve historical data for the past 7 days
+days_to_retrieve = 7
+dates = []
+daily_precipitation = []
+for i in range(days_to_retrieve - 1, -1, -1):  # Start from 7 days ago to today
+    date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+    history_url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={location}&dt={date}"
+    history_response = requests.get(history_url)
+    if history_response.status_code == 200:
+        history_data = history_response.json()
+        dates.append(date)
+        daily_precipitation.append(history_data['forecast']['forecastday'][0]['day']['totalprecip_mm'])
+    else:
+        st.warning(f"Failed to retrieve data for {date}")
+
 # Extract current day's forecast
 current_day_forecast = data['forecast']['forecastday'][0]
 hourly_data_today = current_day_forecast['hour']
 temperatures_today = [hour['temp_c'] for hour in hourly_data_today]
 feels_like_today = [hour['feelslike_c'] for hour in hourly_data_today]
+rainfall_today = [hour['precip_mm'] for hour in hourly_data_today]
+humidity_today = [hour['humidity'] for hour in hourly_data_today]
 times_today = [datetime.strptime(hour['time'], '%Y-%m-%d %H:%M').strftime('%H:%M') for hour in hourly_data_today]
+
+# Find lowest and highest temperatures for current day
+min_temp_today = min(temperatures_today)
+max_temp_today = max(temperatures_today)
+min_temp_time_today = times_today[temperatures_today.index(min_temp_today)]
+max_temp_time_today = times_today[temperatures_today.index(max_temp_today)]
+
+max_humidity = max(humidity_today)
+min_humidity = min(humidity_today)
+max_time = times_today[humidity_today.index(max_humidity)]
+min_time = times_today[humidity_today.index(min_humidity)]
 
 # Extract next day's forecast
 next_day_forecast = data['forecast']['forecastday'][1]
@@ -49,32 +75,37 @@ humidity = [hour['humidity'] for hour in hourly_data_tomorrow]
 wind_speed = [hour['wind_kph'] for hour in hourly_data_tomorrow]
 times_tomorrow = [datetime.strptime(hour['time'], '%Y-%m-%d %H:%M').strftime('%H:%M') for hour in hourly_data_tomorrow]
 
+# Prepare data for the table
+forecasted_dates = [day['date'] for day in data['forecast']['forecastday']]
+forecasted_rainfall = [day['day']['totalprecip_mm'] for day in data['forecast']['forecastday']]
+
 # Calculate averages for current day
 avg_temp_today = sum(temperatures_today) / len(temperatures_today)
 avg_feels_like_today = sum(feels_like_today) / len(feels_like_today)
 
-# Find lowest and highest temperatures for current day
-min_temp_today = min(temperatures_today)
-max_temp_today = max(temperatures_today)
-min_temp_time_today = times_today[temperatures_today.index(min_temp_today)]
-max_temp_time_today = times_today[temperatures_today.index(max_temp_today)]
+# Calculate total rainfall
+total_rainfall_today = sum(rainfall_today)
+max_rainfall_today = max(rainfall_today)
+peak_rainfall_time_today = times_today[rainfall_today.index(max_rainfall_today)]
 
-
-max_humidity = max(humidity)
-min_humidity = min(humidity)
-max_time = times_today[humidity.index(max_humidity)]
-min_time = times_today[humidity.index(min_humidity)]
-
-
-# Clothing recommendations based on average temperature
-if avg_temp_today < 7:
-    suggestion = "Take your gloves!"
-elif avg_temp_today < 13:
-    suggestion = "Bring your hat!"
+# Clothing recommendations based on temperature and rainfall
+if total_rainfall_today > 0.5:
+    if avg_temp_today < 7:
+        suggestion = "Take your gloves and umbrella!"
+    elif avg_temp_today < 13:
+        suggestion = "Bring your hat and umbrella!"
+    else:
+        suggestion = "Take an umbrella!"
 else:
-    suggestion = "No special clothing needed today."
+    if avg_temp_today < 7:
+        suggestion = "Take your gloves!"
+    elif avg_temp_today < 13:
+        suggestion = "Bring your hat!"
+    else:
+        suggestion = "No special clothing needed today."
 
-# Create interactive line chart for the current day's forecast
+# Generate charts
+# Temperature Chart
 temp_chart = go.Figure()
 temp_chart.add_trace(go.Scatter(x=times_today, y=temperatures_today, mode='lines+markers', name='Temperature (°C)', line=dict(color='blue')))
 temp_chart.add_trace(go.Scatter(x=times_today, y=feels_like_today, mode='lines+markers', name='Feels Like (°C)', line=dict(color='orange')))
@@ -115,11 +146,16 @@ temp_chart.update_layout(
     template="plotly_white",
 )
 
-# Create interactive line chart for the current day's forecast
+# Humidity Trend Chart
 hum_chart = go.Figure()
-hum_chart.add_trace(go.Scatter(x=times_today, y=humidity, mode='lines+markers', name='Humidity (%)', line=dict(color='blue')))
-
-
+hum_chart.add_trace(go.Scatter(x=times_today, y=humidity_today, mode='lines+markers', name='Humidity (%)', line=dict(color='blue')))
+hum_chart.update_layout(
+    title="Humidity Trend Throughout the Day (Today)",
+    xaxis_title="Time",
+    yaxis_title="Humidity (%)",
+    legend_title="Legend",
+    template="plotly_white"
+)
 
 hum_chart.add_trace(go.Scatter(
     x=[max_time],
@@ -136,8 +172,6 @@ hum_chart.add_trace(go.Scatter(
     name='Lowest Humidity'
 ))
 
-
-
 hum_chart.update_layout(
     title="Humidity Trend Throughout the Day (Today)",
     xaxis_title="Time",
@@ -147,21 +181,67 @@ hum_chart.update_layout(
 )
 
 
+# Rainfall Trend Chart for Today
+rain_chart = go.Figure()
+rain_chart.add_trace(go.Scatter(x=times_today, y=rainfall_today, mode='lines', fill='tozeroy', name='Rainfall (mm)', line=dict(color='blue')))
+# Add horizontal lines for rainfall levels
+rain_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
+rain_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
+rain_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
+rain_chart.update_layout(
+    title="Rainfall Trend Throughout the Day (Today)",
+    xaxis_title="Time",
+    yaxis_title="Rainfall (mm)",
+    template="plotly_white"
+)
 
+# Historical Precipitation Chart
+historical_chart = go.Figure()
+historical_chart.add_trace(go.Scatter(x=dates, y=daily_precipitation, mode='lines+markers', fill='tozeroy', name='Daily Precipitation (mm)'))
+# Add horizontal lines for rainfall levels
+historical_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
+historical_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
+historical_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
+historical_chart.update_layout(
+    title="Precipitation Trends Over the Week",
+    xaxis_title="Date",
+    yaxis_title="Precipitation (mm)",
+    template="plotly_white"
+)
 
+# Forecasted Rainfall Chart
+forecast_rain_chart = go.Figure()
+forecast_rain_chart.add_trace(go.Scatter(x=forecasted_dates, y=forecasted_rainfall, mode='lines+markers', fill='tozeroy', name='Forecasted Rainfall (mm)'))
+# Add horizontal lines for rainfall levels
+forecast_rain_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
+forecast_rain_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
+forecast_rain_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
+forecast_rain_chart.update_layout(
+    title="Forecasted Rainfall Trends for Upcoming Days",
+    xaxis_title="Date",
+    yaxis_title="Rainfall (mm)",
+    template="plotly_white"
+)
 
-# Display the Streamlit app
+# Streamlit app layout
 st.title("Eindhoven Weather Dashboard")
-st.subheader(f"Date: {current_day_forecast['date']}")
-st.metric("Average Temperature (Today)", f"{avg_temp_today:.2f}°C")
-st.metric("Average Feels Like Temperature (Today)", f"{avg_feels_like_today:.2f}°C")
+
+# Display today's weather
+st.subheader(f"Today's Weather ({current_day_forecast['date']})")
+st.metric("Average Temperature", f"{avg_temp_today:.2f}°C")
+st.metric("Average Feels Like Temperature", f"{avg_feels_like_today:.2f}°C")
+st.metric("Total Rainfall (Today)", f"{total_rainfall_today:.2f} mm")
+st.metric("Peak Rainfall Time (Today)", f"{peak_rainfall_time_today}")
 st.info(f"Clothing Suggestion: {suggestion}")
 
+# Charts
 st.plotly_chart(temp_chart, use_container_width=True)
 st.plotly_chart(hum_chart, use_container_width=True)
+st.plotly_chart(rain_chart, use_container_width=True)
+st.plotly_chart(forecast_rain_chart, use_container_width=True)
+st.plotly_chart(historical_chart, use_container_width=True)
 
-
-
+# Display tomorrow's forecast
 st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
 st.dataframe({
     "Time": times_tomorrow,
@@ -171,4 +251,3 @@ st.dataframe({
     "Humidity (%)": humidity,
     "Wind Speed (km/h)": wind_speed
 })
-
