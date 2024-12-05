@@ -271,7 +271,6 @@ with col3:
     st.info(f"Clothing Suggestion: {suggestion}")
 
     # Display official weather warnings with Meteo
-    # Initialize with country and city name
     country = "Netherlands"
     city = "Eindhoven"
 
@@ -280,9 +279,26 @@ with col3:
     # Get the weather alert
     alert = meteo.get_alert()
     if alert:
-        st.info(f"Alert: {alert}")
+        # Display the alert with a red background
+        st.markdown(
+            f"""
+            <div style="background-color: red; color: white; padding: 10px; border-radius: 5px;">
+                <strong>ALERT:</strong> {alert}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     else:
-        st.info(f"No current official weather alerts for Eindhoven (based on MeteoAlarm).")
+        # Display a "no alerts" message with a green background
+        st.markdown(
+            f"""
+            <div style="background-color: green; color: white; padding: 10px; border-radius: 5px;">
+                No current official alerts for Eindhoven (based on MeteoAlarm).
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
 
 # Display the charts in a grid
 st.subheader("Weather Trends")
