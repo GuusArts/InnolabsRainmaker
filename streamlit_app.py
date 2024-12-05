@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from meteoalertapi import Meteoalert
 
 # Load environment variables
 def configure():
@@ -301,3 +302,20 @@ with col5:
 # Display the forecasted rainfall chart below
 st.plotly_chart(historical_chart, use_container_width=True)
 
+
+# Display official weather warnings with Meteo
+
+st.subheader("Official weather warning (based on MeteoAlarm)")
+
+# Initialize with country and city name
+country = "Netherlands"
+city = "Eindhoven"
+
+meteo = Meteoalert(country, city)
+
+# Get the weather alert
+alert = meteo.get_alert()
+if alert:
+    st.write(f"Alert: {alert}")
+else:
+    st.write(f"No current official alerts for Eindhoven.")
