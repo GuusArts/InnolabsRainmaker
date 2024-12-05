@@ -269,6 +269,22 @@ with col2:
 
 with col3:
     st.info(f"Clothing Suggestion: {suggestion}")
+    # Display official weather warnings with Meteo
+
+    st.subheader("Official weather warning (based on MeteoAlarm)")
+
+    # Initialize with country and city name
+    country = "Netherlands"
+    city = "Eindhoven"
+
+    meteo = Meteoalert(country, city)
+
+    # Get the weather alert
+    alert = meteo.get_alert()
+    if alert:
+        st.write(f"Alert: {alert}")
+    else:
+        st.write(f"No current official alerts for Eindhoven.")
 
 # Display the charts in a grid
 st.subheader("Weather Trends")
@@ -303,19 +319,3 @@ with col5:
 st.plotly_chart(historical_chart, use_container_width=True)
 
 
-# Display official weather warnings with Meteo
-
-st.subheader("Official weather warning (based on MeteoAlarm)")
-
-# Initialize with country and city name
-country = "Netherlands"
-city = "Eindhoven"
-
-meteo = Meteoalert(country, city)
-
-# Get the weather alert
-alert = meteo.get_alert()
-if alert:
-    st.write(f"Alert: {alert}")
-else:
-    st.write(f"No current official alerts for Eindhoven.")
