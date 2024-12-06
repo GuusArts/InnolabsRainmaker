@@ -111,6 +111,14 @@ temp_chart = go.Figure()
 temp_chart.add_trace(go.Scatter(x=times_today, y=temperatures_today, mode='lines+markers', name='Temperature (°C)', line=dict(color='blue')))
 temp_chart.add_trace(go.Scatter(x=times_today, y=feels_like_today, mode='lines+markers', name='Feels Like (°C)', line=dict(color='orange')))
 
+
+
+csv_file = "tunnelvisie-punten.csv"  
+tunnel_data = pd.read_csv(csv_file, delimiter=';')
+
+
+tunnel_data = tunnel_data.rename(columns={"Latitude": "lat", "Longitude": "lon"})
+
 # Add annotations for min and max temperatures
 temp_chart.add_trace(go.Scatter(
     x=[min_temp_time_today],
@@ -310,6 +318,10 @@ with col4:
     st.plotly_chart(temp_chart, use_container_width=True)
     st.plotly_chart(rain_chart, use_container_width=True)
 
+
+# Display the map
+st.subheader("Tunnels in Eindhoven")
+st.map(tunnel_data)
 # Display tomorrow's forecast in a grid
 st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
 st.dataframe({
