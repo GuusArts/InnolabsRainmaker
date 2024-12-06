@@ -5,7 +5,9 @@ import requests
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from meteoalertapi import Meteoalert
-
+import pandas as pd
+import plotly.express as px
+import json
 # Load environment variables
 def configure():
     """Load API key from .env file."""
@@ -25,6 +27,86 @@ location = "Eindhoven"
 url = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q={location}&days=2"
 response = requests.get(url)
 data = response.json()
+
+def fetch_tunnel_data():
+    url = "https://data.eindhoven.nl/api/explore/v2.1/catalog/datasets/tunnelvisie-punten/records?limit=71"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()['results']
+    else:
+        return []
+    
+def get_precipitation(lat, lon):
+    """
+    Fetches precipitation data for a given latitude and longitude.
+    Args:
+        lat (float): Latitude.
+        lon (float): Longitude.
+    Returns:
+        tuple: Max precipitation intensity in mm/h and description.
+    """
+    try:
+        response = requests.get(f"https://gps.buienradar.nl/getrr.php?lat={lat}&lon={lon}")
+        if response.status_code == 200:
+            raw_data = response.text.strip()
+            return parse_precipitation(raw_data)
+        else:
+            return 0, "N/A"
+    except Exception as e:
+        return 0, "Error"
+
+def parse_precipitation(data):
+    """
+    Parses precipitation data using the provided formula.
+    Args:
+        data (str): Precipitation data in the Buienradar format.
+    Returns:
+        tuple: Max precipitation intensity in mm/h and description.
+    """
+    lines = data.splitlines()
+    intensities = []
+
+    for line in lines:
+        parts = line.split("|")
+        if len(parts) == 2:
+            try:
+                waarde = int(parts[0])  # Extract the intensity value
+                intensity = 10 ** ((waarde - 109) / 32)  # Apply the formula
+                intensities.append(intensity)
+            except ValueError:
+                continue
+
+    # Summarize
+    max_intensity = max(intensities) if intensities else 0
+    if max_intensity < 0.1:
+        return max_intensity, "No rain"
+    elif max_intensity <= 2.5:
+        return max_intensity, "Light rain"
+    elif max_intensity <= 7.5:
+        return max_intensity, "Moderate rain"
+    else:
+        return max_intensity, "Heavy rain"
+
+# Function to determine marker color based on precipitation level
+def get_marker_color(precipitation_description):
+    """
+    Maps precipitation description to marker color.
+    Args:
+        precipitation_description (str): Description of precipitation.
+    Returns:
+        str: Marker color.
+    """
+    if precipitation_description == "No rain":
+        return "green"
+    elif precipitation_description == "Light rain":
+        return "blue"
+    elif precipitation_description == "Moderate rain":
+        return "orange"
+    elif precipitation_description == "Heavy rain":
+        return "red"
+    else:
+        return "gray" 
+    
 
 # Check if 'forecast' exists in the response
 if 'forecast' not in data or 'forecastday' not in data['forecast']:
@@ -113,11 +195,7 @@ temp_chart.add_trace(go.Scatter(x=times_today, y=feels_like_today, mode='lines+m
 
 
 
-csv_file = "tunnelvisie-punten.csv"  
-tunnel_data = pd.read_csv(csv_file, delimiter=';')
 
-
-tunnel_data = tunnel_data.rename(columns={"Latitude": "lat", "Longitude": "lon"})
 
 # Add annotations for min and max temperatures
 temp_chart.add_trace(go.Scatter(
@@ -232,6 +310,52 @@ forecast_rain_chart.update_layout(
     template="plotly_white"
 )
 
+
+tunnel_data = fetch_tunnel_data()
+
+# Prepare data for Plotly map
+tunnels = []
+precipitation_data = []
+
+for tunnel in tunnel_data:
+    lat = float(tunnel['lat'])
+    lon = float(tunnel['lon'])
+    locatienaam = tunnel['locatienaam']
+    jaar = tunnel['jaar']
+
+
+    # Fetch precipitation data
+    max_intensity, precipitation_description = get_precipitation(lat, lon)
+
+    # Prepare the data
+    tunnels.append({
+        'locatienaam': locatienaam,
+        'jaar': jaar,
+        'lat': lat,
+        'lon': lon,
+        'precipitation_description': precipitation_description,
+        'precipitation_intensity': max_intensity
+    })
+
+# Convert data to a DataFrame
+df_tunnels = pd.DataFrame(tunnels)
+
+# Create a Plotly map
+fig = px.scatter_mapbox(df_tunnels,
+                        lat=df_tunnels['lat'], lon=df_tunnels['lon'],
+                        hover_name="locatienaam",
+                        hover_data=["precipitation_description", "precipitation_intensity"],
+                        color="precipitation_intensity",
+                        color_continuous_scale="temps",
+                        title="Tunnel Precipitation Map",
+                        zoom=10,
+                        range_color=[0, 10]) 
+
+                    
+# Set the map style
+fig.update_layout(mapbox_style="open-street-map")
+
+
 # # Streamlit app layout
 # st.title("Eindhoven Weather Dashboard")
 
@@ -320,8 +444,7 @@ with col4:
 
 
 # Display the map
-st.subheader("Tunnels in Eindhoven")
-st.map(tunnel_data)
+
 # Display tomorrow's forecast in a grid
 st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
 st.dataframe({
@@ -343,5 +466,7 @@ with col5:
 
 # Display the forecasted rainfall chart below
 st.plotly_chart(historical_chart, use_container_width=True)
-
+# Streamlit layout
+st.title("Tunnel Precipitation Map")
+st.plotly_chart(fig)
 
