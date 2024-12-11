@@ -8,6 +8,7 @@ from meteoalertapi import Meteoalert
 import pandas as pd
 import plotly.express as px
 import json
+
 # Load environment variables
 def configure():
     """Load API key from .env file."""
