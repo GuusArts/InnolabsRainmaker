@@ -3,8 +3,7 @@ import os
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from supabase import create_client, Client
-from datetime import datetime
+from supabase import create_client
 import pytz
 
 # Load environment variables
@@ -16,90 +15,127 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 location = "Eindhoven"
+local_tz = pytz.timezone("Europe/Amsterdam")  # Amsterdam timezone
 
 # ------------------
 # Operations
 # ------------------
 
+# Weather operations
 @op
 def fetch_weather_data():
-    """Fetches weather data from the weather API."""
+    """Fetches weather data from the WeatherAPI."""
     url = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q={location}&days=2"
     response = requests.get(url)
     response.raise_for_status()
     return response.json()
 
 @op
-def process_weather_data(weather_data):
-    """Processes weather data to extract meaningful information."""
-    forecast = weather_data.get("forecast", {}).get("forecastday", [])
-    if not forecast:
-        raise ValueError("No forecast data available")
-
-    today = forecast[0]
-    avg_temp = sum(hour["temp_c"] for hour in today["hour"]) / len(today["hour"])
-    avg_feels_like = sum(hour["feelslike_c"] for hour in today["hour"]) / len(today["hour"])
-    total_rainfall = sum(hour["precip_mm"] for hour in today["hour"])
-
-    peak_rainfall_hour = max(today["hour"], key=lambda h: h["precip_mm"])
-    peak_rainfall_time = peak_rainfall_hour["time"]
-
-    # Generate clothing suggestion
-    if total_rainfall > 0.5:
-        suggestion = "Bring an umbrella!" if avg_temp > 13 else "Take your gloves and umbrella!"
-    else:
-        suggestion = "No special clothing needed today."
-
-    return {
-        "date": today["date"],
-        "location": location,
-        "avg_temp": avg_temp,
-        "avg_feels_like": avg_feels_like,
-        "total_rainfall": total_rainfall,
-        "peak_rainfall_time": peak_rainfall_time,
-        "suggestion": suggestion,
-    }
+def process_weather_trends(weather_data):
+    """Processes hourly trends for today's weather."""
+    today = weather_data["forecast"]["forecastday"][0]["hour"]
+    trends = [
+        {
+            "time": hour["time"],
+            "temperature": hour["temp_c"],
+            "feels_like": hour["feelslike_c"],
+            "humidity": hour["humidity"],
+            "rainfall": hour["precip_mm"],
+            "created_at": datetime.now(local_tz).isoformat(),  # Add timestamp
+        }
+        for hour in today
+    ]
+    return trends
 
 @op
 def store_weather_data(weather_data):
     """Inserts processed weather data into Supabase."""
-    local_tz = pytz.timezone("Europe/Amsterdam")  # Adjust for your timezone
+    local_tz = pytz.timezone("Europe/Amsterdam")  # Amsterdam timezone
     weather_data["created_at"] = datetime.now(local_tz).isoformat()  # Add local timestamp
-    supabase.table("weather_data").insert(weather_data).execute()
+    response = supabase.table("weather_data").insert(weather_data).execute()
+    if response.status_code != 201:
+        raise ValueError(f"Failed to save weather data: {response.json()}")
 
+
+@op
+def store_today_weather_trends(trends):
+    """Inserts hourly weather trends for today into Supabase."""
+    supabase.table("today_weather_trends").insert(trends).execute()
+
+@op
+def process_forecast_data(weather_data):
+    """Processes forecasted rainfall data for the upcoming two days."""
+    forecast = [
+        {
+            "date": day["date"],
+            "total_rainfall": day["day"]["totalprecip_mm"],
+            "created_at": datetime.now(local_tz).isoformat(),  # Add timestamp
+        }
+        for day in weather_data["forecast"]["forecastday"]
+    ]
+    return forecast
+
+@op
+def store_forecast_weather(forecast):
+    """Inserts forecasted rainfall trends into Supabase."""
+    supabase.table("forecast_weather").insert(forecast).execute()
+
+@op
+def process_tomorrow_weather(weather_data):
+    """Processes tomorrow's hourly weather forecast."""
+    tomorrow = weather_data["forecast"]["forecastday"][1]["hour"]
+    forecast = [
+        {
+            "time": hour["time"],
+            "temperature": hour["temp_c"],
+            "feels_like": hour["feelslike_c"],
+            "precipitation": hour["precip_mm"],
+            "humidity": hour["humidity"],
+            "wind_speed": hour["wind_kph"],
+            "created_at": datetime.now(local_tz).isoformat(),  # Add timestamp
+        }
+        for hour in tomorrow
+    ]
+    return forecast
+
+@op
+def store_tomorrow_weather(forecast):
+    """Inserts tomorrow's hourly weather data into Supabase."""
+    supabase.table("tomorrow_weather").insert(forecast).execute()
+
+# Tunnel data operations
 @op
 def fetch_tunnel_data():
     """Fetches tunnel data from the Eindhoven API."""
     url = "https://data.eindhoven.nl/api/explore/v2.1/catalog/datasets/tunnelvisie-punten/records?limit=71"
     response = requests.get(url)
     response.raise_for_status()
-    tunnels = response.json().get("results", [])
-    return tunnels
+    return response.json().get("results", [])
 
 @op
 def process_tunnel_data(tunnels):
-    """Processes tunnel data by adding precipitation information."""
+    """Processes tunnel data and adds precipitation information."""
     processed_tunnels = []
     for tunnel in tunnels:
         lat = float(tunnel["lat"])
         lon = float(tunnel["lon"])
         location_name = tunnel["locatienaam"]
         
-        # Clean the year field
+        # Clean and parse the 'jaar' field
         raw_year = tunnel.get("jaar", None)
         try:
-            # Extract the first valid year if a range is provided (e.g., "2017/2022")
-            year = int(raw_year.split("/")[0]) if isinstance(raw_year, str) and "/" in raw_year else int(raw_year)
+            if isinstance(raw_year, str) and "/" in raw_year:
+                year = int(raw_year.split("/")[0])  # Take the first year in the range
+            else:
+                year = int(raw_year) if raw_year else None
         except (ValueError, TypeError):
             year = None  # Set to None if parsing fails
 
-        # Fetch precipitation data for each tunnel
+        # Fetch precipitation data
         precip_response = requests.get(f"https://gps.buienradar.nl/getrr.php?lat={lat}&lon={lon}")
         precip_data = precip_response.text.strip()
-        precipitation_description = "No rain"
         precipitation_intensity = 0
 
-        # Process precipitation data
         for line in precip_data.splitlines():
             parts = line.split("|")
             if len(parts) == 2:
@@ -109,15 +145,12 @@ def process_tunnel_data(tunnels):
                 except ValueError:
                     continue
 
-        # Set description based on intensity
-        if precipitation_intensity < 0.1:
-            precipitation_description = "No rain"
-        elif precipitation_intensity <= 2.5:
-            precipitation_description = "Light rain"
-        elif precipitation_intensity <= 7.5:
-            precipitation_description = "Moderate rain"
-        else:
-            precipitation_description = "Heavy rain"
+        precipitation_description = (
+            "No rain" if precipitation_intensity < 0.1 else
+            "Light rain" if precipitation_intensity <= 2.5 else
+            "Moderate rain" if precipitation_intensity <= 7.5 else
+            "Heavy rain"
+        )
 
         processed_tunnels.append({
             "location_name": location_name,
@@ -126,6 +159,7 @@ def process_tunnel_data(tunnels):
             "longitude": lon,
             "precipitation_description": precipitation_description,
             "precipitation_intensity": precipitation_intensity,
+            "created_at": datetime.now(local_tz).isoformat(),  # Add Amsterdam timezone timestamp
         })
 
     return processed_tunnels
@@ -134,58 +168,49 @@ def process_tunnel_data(tunnels):
 @op
 def store_tunnel_data(processed_tunnels):
     """Inserts processed tunnel data into Supabase."""
-    local_tz = pytz.timezone("Europe/Amsterdam")  # Adjust for your timezone
-    for tunnel in processed_tunnels:
-        tunnel["created_at"] = datetime.now(local_tz).isoformat()  # Add local timestamp
     supabase.table("tunnel_data").insert(processed_tunnels).execute()
-
-
-@op
-def fetch_historical_precipitation():
-    """Fetches historical precipitation data."""
-    dates = []
-    precipitation = []
-    for i in range(7):  # Past 7 days
-        date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-        history_url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={location}&dt={date}"
-        response = requests.get(history_url)
-        response.raise_for_status()
-        history_data = response.json()
-        dates.append(date)
-        precipitation.append(history_data["forecast"]["forecastday"][0]["day"]["totalprecip_mm"])
-
-    return [{"date": date, "precipitation": precip, "type": "historical"} for date, precip in zip(dates, precipitation)]
-
-@op
-def store_precipitation_trends(trends):
-    """Inserts precipitation trends into Supabase."""
-    supabase.table("precipitation_trends").insert(trends).execute()
 
 # ------------------
 # Jobs
 # ------------------
 
 @job
-def weather_pipeline():
+def today_weather_trends_pipeline():
+    """Pipeline to process and store today's weather trends."""
     weather_data = fetch_weather_data()
-    processed_weather = process_weather_data(weather_data)
-    store_weather_data(processed_weather)
+    trends = process_weather_trends(weather_data)
+    store_today_weather_trends(trends)
+
+@job
+def forecast_weather_pipeline():
+    """Pipeline to process and store forecasted rainfall trends."""
+    weather_data = fetch_weather_data()
+    forecast = process_forecast_data(weather_data)
+    store_forecast_weather(forecast)
+
+@job
+def tomorrow_weather_pipeline():
+    """Pipeline to process and store tomorrow's hourly weather forecast."""
+    weather_data = fetch_weather_data()
+    tomorrow_data = process_tomorrow_weather(weather_data)
+    store_tomorrow_weather(tomorrow_data)
 
 @job
 def tunnel_pipeline():
+    """Pipeline to process and store tunnel data."""
     tunnels = fetch_tunnel_data()
     processed_tunnels = process_tunnel_data(tunnels)
     store_tunnel_data(processed_tunnels)
 
-@job
-def precipitation_pipeline():
-    trends = fetch_historical_precipitation()
-    store_precipitation_trends(trends)
-
 # ------------------
-# Repositories
+# Repository
 # ------------------
 
 @repository
 def data_pipeline_repository():
-    return [weather_pipeline, tunnel_pipeline, precipitation_pipeline]
+    return [
+        today_weather_trends_pipeline,
+        forecast_weather_pipeline,
+        tomorrow_weather_pipeline,
+        tunnel_pipeline,
+    ]
