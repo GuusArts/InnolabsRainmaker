@@ -196,8 +196,6 @@ temp_chart.add_trace(go.Scatter(x=times_today, y=feels_like_today, mode='lines+m
 
 
 
-
-
 # Add annotations for min and max temperatures
 temp_chart.add_trace(go.Scatter(
     x=[min_temp_time_today],

@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 import pytz
+import logging
+
 
 # Load environment variables
 load_dotenv()
@@ -50,11 +52,50 @@ def process_weather_trends(weather_data):
 @op
 def store_weather_data(weather_data):
     """Inserts processed weather data into Supabase."""
-    local_tz = pytz.timezone("Europe/Amsterdam")  # Amsterdam timezone
-    weather_data["created_at"] = datetime.now(local_tz).isoformat()  # Add local timestamp
-    response = supabase.table("weather_data").insert(weather_data).execute()
-    if response.status_code != 201:
-        raise ValueError(f"Failed to save weather data: {response.json()}")
+    try:
+        local_tz = pytz.timezone("Europe/Amsterdam")
+        today_data = weather_data["forecast"]["forecastday"][0]["day"]
+
+        # Extract necessary fields
+        avg_temp = today_data["avgtemp_c"]
+        total_rainfall = today_data["totalprecip_mm"]
+        avg_feels_like = sum(hour["feelslike_c"] for hour in weather_data["forecast"]["forecastday"][0]["hour"]) / len(weather_data["forecast"]["forecastday"][0]["hour"])
+        peak_rainfall_time = max(
+            weather_data["forecast"]["forecastday"][0]["hour"],
+            key=lambda h: h["precip_mm"]
+        )["time"]
+
+        # Weather alert processing
+        alert = weather_data.get("alerts", {}).get("alert", [])
+        weather_alert = alert[0]["headline"] if alert else "No alerts"
+
+        # Prepare data for insertion
+        processed_data = {
+            "date": weather_data["location"]["localtime"].split(" ")[0],
+            "location": weather_data["location"]["name"],
+            "avg_temp": avg_temp,
+            "avg_feels_like": avg_feels_like,
+            "total_rainfall": total_rainfall,
+            "peak_rainfall_time": peak_rainfall_time,
+            "suggestion": "Bring an umbrella!" if total_rainfall > 0.5 else "No special clothing needed.",
+            "weather_alert": weather_alert,
+            "created_at": datetime.now(local_tz).isoformat()
+        }
+
+        # Insert into Supabase
+        response = supabase.table("weather_data").insert(processed_data).execute()
+
+        # Check if an error occurred during insertion
+        if response.error:
+            raise ValueError(f"Failed to save weather data: {response.error.message}")
+        else:
+            logging.info("Successfully inserted weather data into Supabase")
+
+    except Exception as e:
+        logging.error(f"Error storing weather data: {e}")
+        raise
+
+
 
 
 @op
@@ -179,6 +220,7 @@ def today_weather_trends_pipeline():
     """Pipeline to process and store today's weather trends."""
     weather_data = fetch_weather_data()
     trends = process_weather_trends(weather_data)
+    store_weather_data(weather_data)
     store_today_weather_trends(trends)
 
 @job
