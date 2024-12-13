@@ -69,7 +69,7 @@ def store_weather_data(weather_data):
         response = supabase.table("weather_data").insert(processed_data).execute()
 
         # Check if an error occurred during insertion
-        if response.error:
+        if hasattr(response, 'error'): 
             raise ValueError(f"Failed to save weather data: {response.error.message}")
         else:
             logging.info("Successfully inserted weather data into Supabase")
