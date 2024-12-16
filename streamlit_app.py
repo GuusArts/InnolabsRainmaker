@@ -1,471 +1,451 @@
-from dotenv import load_dotenv
+from supabase import create_client
 import os
 import streamlit as st
-import requests
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-from meteoalertapi import Meteoalert
+from dotenv import load_dotenv
 import pandas as pd
+import plotly.graph_objects as go
 import plotly.express as px
-import json
+from datetime import date
 
 # Load environment variables
-def configure():
-    """Load API key from .env file."""
-    load_dotenv()
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-configure()
-api_key = os.getenv('api_key')
+# Initialize Supabase client
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Fallback to st.secrets if .env configuration does not provide an API key
-if not api_key:
-    api_key = st.secrets.get('api_key')
+# Fetch data from Supabase
+def fetch_table_data(table_name):
+    response = supabase.table(table_name).select("*").execute()
+    if hasattr(response, 'error'):
+        st.error(f"Error fetching data from {table_name}: {response.error.message}")
+        return None
+    return pd.DataFrame(response.data)
 
-# Weather API setup
-location = "Eindhoven"
+# Fetch all required data
+weather_data = fetch_table_data("weather_data")
+forecast_weather = fetch_table_data("forecast_weather")
+today_weather_trends = fetch_table_data("today_weather_trends")
+historical_precipitation = fetch_table_data("precipitation_trends")
+tunnel_data = fetch_table_data("tunnel_data")
+tomorrow_weather = fetch_table_data("tomorrow_weather")
 
-# Fetch forecast data
-url = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q={location}&days=2"
-response = requests.get(url)
-data = response.json()
-
-def fetch_tunnel_data():
-    url = "https://data.eindhoven.nl/api/explore/v2.1/catalog/datasets/tunnelvisie-punten/records?limit=71"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()['results']
-    else:
-        return []
-    
-def get_precipitation(lat, lon):
-    """
-    Fetches precipitation data for a given latitude and longitude.
-    Args:
-        lat (float): Latitude.
-        lon (float): Longitude.
-    Returns:
-        tuple: Max precipitation intensity in mm/h and description.
-    """
-    try:
-        response = requests.get(f"https://gps.buienradar.nl/getrr.php?lat={lat}&lon={lon}")
-        if response.status_code == 200:
-            raw_data = response.text.strip()
-            return parse_precipitation(raw_data)
-        else:
-            return 0, "N/A"
-    except Exception as e:
-        return 0, "Error"
-
-def parse_precipitation(data):
-    """
-    Parses precipitation data using the provided formula.
-    Args:
-        data (str): Precipitation data in the Buienradar format.
-    Returns:
-        tuple: Max precipitation intensity in mm/h and description.
-    """
-    lines = data.splitlines()
-    intensities = []
-
-    for line in lines:
-        parts = line.split("|")
-        if len(parts) == 2:
-            try:
-                waarde = int(parts[0])  # Extract the intensity value
-                intensity = 10 ** ((waarde - 109) / 32)  # Apply the formula
-                intensities.append(intensity)
-            except ValueError:
-                continue
-
-    # Summarize
-    max_intensity = max(intensities) if intensities else 0
-    if max_intensity < 0.1:
-        return max_intensity, "No rain"
-    elif max_intensity <= 2.5:
-        return max_intensity, "Light rain"
-    elif max_intensity <= 7.5:
-        return max_intensity, "Moderate rain"
-    else:
-        return max_intensity, "Heavy rain"
-
-# Function to determine marker color based on precipitation level
-def get_marker_color(precipitation_description):
-    """
-    Maps precipitation description to marker color.
-    Args:
-        precipitation_description (str): Description of precipitation.
-    Returns:
-        str: Marker color.
-    """
-    if precipitation_description == "No rain":
-        return "green"
-    elif precipitation_description == "Light rain":
-        return "blue"
-    elif precipitation_description == "Moderate rain":
-        return "orange"
-    elif precipitation_description == "Heavy rain":
-        return "red"
-    else:
-        return "gray" 
-    
-
-# Check if 'forecast' exists in the response
-if 'forecast' not in data or 'forecastday' not in data['forecast']:
-    st.error("Invalid response: 'forecast' data is missing")
-    st.stop()
-
-# Retrieve historical data for the past 7 days
-days_to_retrieve = 7
-dates = []
-daily_precipitation = []
-for i in range(days_to_retrieve - 1, -1, -1):  # Start from 7 days ago to today
-    date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-    history_url = f"http://api.weatherapi.com/v1/history.json?key={api_key}&q={location}&dt={date}"
-    history_response = requests.get(history_url)
-    if history_response.status_code == 200:
-        history_data = history_response.json()
-        dates.append(date)
-        daily_precipitation.append(history_data['forecast']['forecastday'][0]['day']['totalprecip_mm'])
-    else:
-        st.warning(f"Failed to retrieve data for {date}")
-
-# Extract current day's forecast
-current_day_forecast = data['forecast']['forecastday'][0]
-hourly_data_today = current_day_forecast['hour']
-temperatures_today = [hour['temp_c'] for hour in hourly_data_today]
-feels_like_today = [hour['feelslike_c'] for hour in hourly_data_today]
-rainfall_today = [hour['precip_mm'] for hour in hourly_data_today]
-humidity_today = [hour['humidity'] for hour in hourly_data_today]
-times_today = [datetime.strptime(hour['time'], '%Y-%m-%d %H:%M').strftime('%H:%M') for hour in hourly_data_today]
-
-# Find lowest and highest temperatures for current day
-min_temp_today = min(temperatures_today)
-max_temp_today = max(temperatures_today)
-min_temp_time_today = times_today[temperatures_today.index(min_temp_today)]
-max_temp_time_today = times_today[temperatures_today.index(max_temp_today)]
-
-max_humidity = max(humidity_today)
-min_humidity = min(humidity_today)
-max_time = times_today[humidity_today.index(max_humidity)]
-min_time = times_today[humidity_today.index(min_humidity)]
-
-# Extract next day's forecast
-next_day_forecast = data['forecast']['forecastday'][1]
-hourly_data_tomorrow = next_day_forecast['hour']
-temperatures_tomorrow = [hour['temp_c'] for hour in hourly_data_tomorrow]
-feels_like_tomorrow = [hour['feelslike_c'] for hour in hourly_data_tomorrow]
-precipitation = [hour['precip_mm'] for hour in hourly_data_tomorrow]
-humidity = [hour['humidity'] for hour in hourly_data_tomorrow]
-wind_speed = [hour['wind_kph'] for hour in hourly_data_tomorrow]
-times_tomorrow = [datetime.strptime(hour['time'], '%Y-%m-%d %H:%M').strftime('%H:%M') for hour in hourly_data_tomorrow]
-
-# Prepare data for the table
-forecasted_dates = [day['date'] for day in data['forecast']['forecastday']]
-forecasted_rainfall = [day['day']['totalprecip_mm'] for day in data['forecast']['forecastday']]
-
-# Calculate averages for current day
-avg_temp_today = sum(temperatures_today) / len(temperatures_today)
-avg_feels_like_today = sum(feels_like_today) / len(feels_like_today)
-
-# Calculate total rainfall
-total_rainfall_today = sum(rainfall_today)
-max_rainfall_today = max(rainfall_today)
-peak_rainfall_time_today = times_today[rainfall_today.index(max_rainfall_today)]
-
-# Clothing recommendations based on temperature and rainfall
-if total_rainfall_today > 0.5:
-    if avg_temp_today < 7:
-        suggestion = "Take your gloves and umbrella!"
-    elif avg_temp_today < 13:
-        suggestion = "Bring your hat and umbrella!"
-    else:
-        suggestion = "Take an umbrella!"
-else:
-    if avg_temp_today < 7:
-        suggestion = "Take your gloves!"
-    elif avg_temp_today < 13:
-        suggestion = "Bring your hat!"
-    else:
-        suggestion = "No special clothing needed today."
-
-# Generate charts
-# Temperature Chart
-temp_chart = go.Figure()
-temp_chart.add_trace(go.Scatter(x=times_today, y=temperatures_today, mode='lines+markers', name='Temperature (°C)', line=dict(color='blue')))
-temp_chart.add_trace(go.Scatter(x=times_today, y=feels_like_today, mode='lines+markers', name='Feels Like (°C)', line=dict(color='orange')))
-
-
-
-# Add annotations for min and max temperatures
-temp_chart.add_trace(go.Scatter(
-    x=[min_temp_time_today],
-    y=[min_temp_today],
-    mode='markers',
-    marker=dict(color='red', size=10),
-    showlegend=False  # Prevent from appearing as a separate trace
-))
-temp_chart.add_trace(go.Scatter(
-    x=[max_temp_time_today],
-    y=[max_temp_today],
-    mode='markers',
-    marker=dict(color='green', size=10),
-    showlegend=False  # Prevent from appearing as a separate trace
-))
-
-# Add a custom legend for highest and lowest temperatures
-temp_chart.add_trace(go.Scatter(
-    x=[None], y=[None], mode='markers',
-    marker=dict(color='red', size=10),
-    name='Lowest Temp'
-))
-temp_chart.add_trace(go.Scatter(
-    x=[None], y=[None], mode='markers',
-    marker=dict(color='green', size=10),
-    name='Highest Temp'
-))
-
-temp_chart.update_layout(
-    title="Temperature Trend Throughout the Day (Today)",
-    xaxis_title="Time",
-    yaxis_title="Temperature (°C)",
-    legend_title="Legend",
-    template="plotly_white",
-)
-
-# Humidity Trend Chart
-hum_chart = go.Figure()
-hum_chart.add_trace(go.Scatter(x=times_today, y=humidity_today, mode='lines+markers', name='Humidity (%)', line=dict(color='blue')))
-hum_chart.update_layout(
-    title="Humidity Trend Throughout the Day (Today)",
-    xaxis_title="Time",
-    yaxis_title="Humidity (%)",
-    legend_title="Legend",
-    template="plotly_white"
-)
-
-hum_chart.add_trace(go.Scatter(
-    x=[max_time],
-    y=[max_humidity],
-    mode='markers',
-    marker=dict(color='green', size=10),
-    name='Highest Humidity'
-))
-hum_chart.add_trace(go.Scatter(
-    x=[min_time],
-    y=[min_humidity],
-    mode='markers',
-    marker=dict(color='red', size=10),
-    name='Lowest Humidity'
-))
-
-hum_chart.update_layout(
-    title="Humidity Trend Throughout the Day (Today)",
-    xaxis_title="Time",
-    yaxis_title="Humidity %",
-    legend_title="Legend",
-    template="plotly_white",
-)
-
-
-# Rainfall Trend Chart for Today
-rain_chart = go.Figure()
-rain_chart.add_trace(go.Scatter(x=times_today, y=rainfall_today, mode='lines', fill='tozeroy', name='Rainfall (mm)', line=dict(color='blue')))
-# Add horizontal lines for rainfall levels
-rain_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
-rain_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
-rain_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
-rain_chart.update_layout(
-    title="Rainfall Trend Throughout the Day (Today)",
-    xaxis_title="Time",
-    yaxis_title="Rainfall (mm)",
-    template="plotly_white"
-)
-
-# Historical Precipitation Chart
-historical_chart = go.Figure()
-historical_chart.add_trace(go.Scatter(x=dates, y=daily_precipitation, mode='lines+markers', fill='tozeroy', name='Daily Precipitation (mm)'))
-# Add horizontal lines for rainfall levels
-historical_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
-historical_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
-historical_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
-historical_chart.update_layout(
-    title="Precipitation Trends Over the Week",
-    xaxis_title="Date",
-    yaxis_title="Precipitation (mm)",
-    template="plotly_white"
-)
-
-# Forecasted Rainfall Chart
-forecast_rain_chart = go.Figure()
-forecast_rain_chart.add_trace(go.Scatter(x=forecasted_dates, y=forecasted_rainfall, mode='lines+markers', fill='tozeroy', name='Forecasted Rainfall (mm)'))
-# Add horizontal lines for rainfall levels
-forecast_rain_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
-forecast_rain_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
-forecast_rain_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
-forecast_rain_chart.update_layout(
-    title="Forecasted Rainfall Trends for Upcoming Days",
-    xaxis_title="Date",
-    yaxis_title="Rainfall (mm)",
-    template="plotly_white"
-)
-
-
-tunnel_data = fetch_tunnel_data()
-
-# Prepare data for Plotly map
-tunnels = []
-precipitation_data = []
-
-for tunnel in tunnel_data:
-    lat = float(tunnel['lat'])
-    lon = float(tunnel['lon'])
-    locatienaam = tunnel['locatienaam']
-    jaar = tunnel['jaar']
-
-
-    # Fetch precipitation data
-    max_intensity, precipitation_description = get_precipitation(lat, lon)
-
-    # Prepare the data
-    tunnels.append({
-        'locatienaam': locatienaam,
-        'jaar': jaar,
-        'lat': lat,
-        'lon': lon,
-        'precipitation_description': precipitation_description,
-        'precipitation_intensity': max_intensity
-    })
-
-# Convert data to a DataFrame
-df_tunnels = pd.DataFrame(tunnels)
-
-# Create a Plotly map
-fig = px.scatter_mapbox(df_tunnels,
-                        lat=df_tunnels['lat'], lon=df_tunnels['lon'],
-                        hover_name="locatienaam",
-                        hover_data=["precipitation_description", "precipitation_intensity"],
-                        color="precipitation_intensity",
-                        color_continuous_scale="temps",
-                        title="Tunnel Precipitation Map",
-                        zoom=10,
-                        range_color=[0, 10]) 
-
-                    
-# Set the map style
-fig.update_layout(mapbox_style="open-street-map")
-
-
-# # Streamlit app layout
-# st.title("Eindhoven Weather Dashboard")
-
-# # Display today's weather
-# st.subheader(f"Today's Weather ({current_day_forecast['date']})")
-# st.metric("Average Temperature", f"{avg_temp_today:.2f}°C")
-# st.metric("Average Feels Like Temperature", f"{avg_feels_like_today:.2f}°C")
-# st.metric("Total Rainfall (Today)", f"{total_rainfall_today:.2f} mm")
-# st.metric("Peak Rainfall Time (Today)", f"{peak_rainfall_time_today}")
-# st.info(f"Clothing Suggestion: {suggestion}")
-
-# # Charts
-# st.plotly_chart(temp_chart, use_container_width=True)
-# st.plotly_chart(hum_chart, use_container_width=True)
-# st.plotly_chart(rain_chart, use_container_width=True)
-# st.plotly_chart(forecast_rain_chart, use_container_width=True)
-# st.plotly_chart(historical_chart, use_container_width=True)
-
-# # Display tomorrow's forecast
-# st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
-# st.dataframe({
-#     "Time": times_tomorrow,
-#     "Temperature (°C)": temperatures_tomorrow,
-#     "Feels Like (°C)": feels_like_tomorrow,
-#     "Precipitation (mm)": precipitation,
-#     "Humidity (%)": humidity,
-#     "Wind Speed (km/h)": wind_speed
-# })
-
+# Display Dashboard
 st.title("Eindhoven Weather Dashboard")
 
-# Display today's weather in a grid
-st.subheader(f"Today's Weather ({current_day_forecast['date']})")
-col1, col2, col3 = st.columns(3)  # Create a three-column layout
+# Today's Weather
+if not weather_data.empty:
+    # Filter for today's data
+    today_date = str(date.today())
+    today_data = weather_data[weather_data["date"] == today_date]
 
-with col1:
-    st.metric("Average Temperature", f"{avg_temp_today:.2f}°C")
-    st.metric("Peak Rainfall Time (Today)", f"{peak_rainfall_time_today}")
+    if not today_data.empty:
+        # Sort by 'created_at' and pick the latest record
+        today_data = today_data.sort_values(by="created_at", ascending=False).iloc[0]
 
-with col2:
-    st.metric("Average Feels Like Temperature", f"{avg_feels_like_today:.2f}°C")
-    st.metric("Total Rainfall (Today)", f"{total_rainfall_today:.2f} mm")
+        st.subheader(f"Today's Weather ({today_data['date']})")
+        col1, col2, col3 = st.columns(3)  # Three columns layout
+        with col1:
+            st.metric("Average Temperature", f"{today_data['avg_temp']:.2f}°C")
+            st.metric("Peak Rainfall Time", today_data['peak_rainfall_time'])
+        with col2:
+            st.metric("Average Feels Like Temperature", f"{today_data['avg_feels_like']:.2f}°C")
+            st.metric("Total Rainfall (Today)", f"{today_data['total_rainfall']:.2f} mm")
+        with col3:
+            # Clothing Suggestion
+            st.info(f"Clothing Suggestion: {today_data['suggestion']}")
 
-with col3:
-    st.info(f"Clothing Suggestion: {suggestion}")
+            # Add space below the suggestion
+            st.markdown("<br>", unsafe_allow_html=True)
 
-    # Display official weather warnings with Meteo
-    country = "Netherlands"
-    city = "Eindhoven"
-
-    meteo = Meteoalert(country, city)
-
-    # Get the weather alert
-    alert = meteo.get_alert()
-    if alert:
-        # Display the alert with a red background
-        st.markdown(
-            f"""
-            <div style="background-color: red; color: white; padding: 10px; border-radius: 5px;">
-                <strong>ALERT:</strong> {alert}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+            # Display Weather Alert Box below suggestion
+            weather_alert = today_data.get("weather_alert", "No alerts")
+            if weather_alert and weather_alert != "No alerts":
+                st.markdown(
+                    f"""
+                    <div style="background-color: red; color: white; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;">
+                        ALERT: {weather_alert} <br>(based on MeteoAlarm)
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    f"""
+                    <div style="background-color: green; color: white; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;">
+                        No current official alerts for Eindhoven. <br>(based on MeteoAlarm)
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
     else:
-        # Display a "no alerts" message with a green background
-        st.markdown(
-            f"""
-            <div style="background-color: green; color: white; padding: 10px; border-radius: 5px;">
-                No current official alerts for Eindhoven (based on MeteoAlarm).
-            </div>
-            """,
-            unsafe_allow_html=True
+        st.warning("No weather data available for today!")
+    
+
+# Weather Trends - Temperature and Humidity Trends Side-by-Side
+if not today_weather_trends.empty:
+    st.subheader("Weather Trends")
+
+    # Convert 'time' column to datetime
+    today_weather_trends["time"] = pd.to_datetime(today_weather_trends["time"])
+
+    # Filter data for today's date
+    today_date = date.today()
+    today_trend = today_weather_trends[today_weather_trends["time"].dt.date == today_date]
+
+    if not today_trend.empty:
+        # Keep only the latest record for each unique time
+        today_trend = today_trend.sort_values(by="time").drop_duplicates(subset=["time"], keep="last").reset_index(drop=True)
+
+        # Remove rows with NaN values in relevant columns
+        today_trend = today_trend.dropna(subset=["temperature", "feels_like", "humidity"])
+
+        # Extract data
+        times_today = today_trend["time"].dt.strftime('%H:%M')  # Format time as 'HH:MM'
+        temperatures_today = today_trend["temperature"].reset_index(drop=True)
+        feels_like_today = today_trend["feels_like"].reset_index(drop=True)
+        humidity_today = today_trend["humidity"].reset_index(drop=True)
+
+        # Identify min and max values for Temperature
+        min_temp_today = temperatures_today.min()
+        max_temp_today = temperatures_today.max()
+        min_temp_time_today = times_today.iloc[temperatures_today.idxmin()]
+        max_temp_time_today = times_today.iloc[temperatures_today.idxmax()]
+
+        # Identify min and max values for Humidity
+        min_humidity_today = humidity_today.min()
+        max_humidity_today = humidity_today.max()
+        min_humidity_time_today = times_today.iloc[humidity_today.idxmin()]
+        max_humidity_time_today = times_today.iloc[humidity_today.idxmax()]
+
+        # Create Temperature Chart
+        temp_chart = go.Figure()
+        temp_chart.add_trace(go.Scatter(x=times_today, y=temperatures_today, 
+                                        mode='lines+markers', name='Temperature (°C)', line=dict(color='blue')))
+        temp_chart.add_trace(go.Scatter(x=times_today, y=feels_like_today, 
+                                        mode='lines+markers', name='Feels Like (°C)', line=dict(color='orange')))
+        temp_chart.add_trace(go.Scatter(
+            x=[min_temp_time_today], y=[min_temp_today], mode='markers',
+            marker=dict(color='red', size=10), showlegend=False))
+        temp_chart.add_trace(go.Scatter(
+            x=[max_temp_time_today], y=[max_temp_today], mode='markers',
+            marker=dict(color='green', size=10), showlegend=False))
+        temp_chart.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers', marker=dict(color='red', size=10), name='Lowest Temp'))
+        temp_chart.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers', marker=dict(color='green', size=10), name='Highest Temp'))
+        temp_chart.update_layout(
+            title="Temperature Trend Throughout the Day (Today)",
+            xaxis_title="Time", yaxis_title="Temperature (°C)",
+            legend_title="Legend", template="plotly_white"
         )
 
+        # Create Humidity Chart
+        hum_chart = go.Figure()
+        hum_chart.add_trace(go.Scatter(x=times_today, y=humidity_today, 
+                                       mode='lines+markers', name='Humidity (%)', line=dict(color='blue')))
+        hum_chart.add_trace(go.Scatter(
+            x=[min_humidity_time_today], y=[min_humidity_today], mode='markers',
+            marker=dict(color='red', size=10), showlegend=False))
+        hum_chart.add_trace(go.Scatter(
+            x=[max_humidity_time_today], y=[max_humidity_today], mode='markers',
+            marker=dict(color='green', size=10), showlegend=False))
+        hum_chart.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers', marker=dict(color='red', size=10), name='Lowest Humidity'))
+        hum_chart.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers', marker=dict(color='green', size=10), name='Highest Humidity'))
+        hum_chart.update_layout(
+            title="Humidity Trend Throughout the Day (Today)",
+            xaxis_title="Time", yaxis_title="Humidity (%)",
+            legend_title="Legend", template="plotly_white"
+        )
 
-# Display the charts in a grid
-st.subheader("Weather Trends")
+        # Display charts side-by-side
+        col1, col2 = st.columns(2)
+        with col1:
+            st.plotly_chart(temp_chart, use_container_width=True)
+        with col2:
+            st.plotly_chart(hum_chart, use_container_width=True)
+    else:
+        st.warning("No valid weather trend data available for today!")
+else:
+    st.warning("No weather trend data available!")
 
-# Create a two-column layout for the charts
-col4, col5 = st.columns(2)
+# Create two columns for displaying charts side by side
+col1, col2 = st.columns(2)
 
-with col4:
-    st.plotly_chart(temp_chart, use_container_width=True)
-    st.plotly_chart(rain_chart, use_container_width=True)
+# Column 1: Rainfall Trend for Today
+with col1:
+    st.subheader("Rainfall Trend Throughout the Day (Today)")
+
+    # Filter for today's date
+    today_date = date.today()
+    today_trend = today_weather_trends[
+        pd.to_datetime(today_weather_trends["time"]).dt.date == today_date
+    ]
+
+    if not today_trend.empty:
+        # Extract times and rainfall data
+        times_today = pd.to_datetime(today_trend["time"]).dt.strftime('%H:%M')
+        rainfall_today = today_trend["rainfall"]
+
+        # Create Rainfall Trend Chart for Today
+        rain_today_chart = go.Figure()
+        rain_today_chart.add_trace(go.Scatter(
+            x=times_today, y=rainfall_today, mode='lines', fill='tozeroy',
+            name='Rainfall (mm)', line=dict(color='blue')
+        ))
+
+        # Add horizontal lines for rainfall levels
+        rain_today_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
+        rain_today_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
+        rain_today_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
+
+        # Update layout
+        rain_today_chart.update_layout(
+            xaxis_title="Time", yaxis_title="Rainfall (mm)",
+            template="plotly_white", xaxis=dict(tickangle=45)
+        )
+
+        # Display the chart
+        st.plotly_chart(rain_today_chart, use_container_width=True)
+    else:
+        st.warning("No rainfall data available for today!")
+
+# Column 2: Forecasted Rainfall Trends
+with col2:
+    st.subheader("Forecasted Rainfall Trends for Upcoming Days")
+
+    # Convert 'time' column to datetime
+    forecast_weather["time"] = pd.to_datetime(forecast_weather["time"])
+
+    # Filter for upcoming dates (including today)
+    upcoming_forecast = forecast_weather[forecast_weather["time"].dt.date >= today_date]
+
+    if not upcoming_forecast.empty:
+        # Aggregate rainfall by date
+        upcoming_forecast["date"] = upcoming_forecast["time"].dt.date
+        forecasted_rainfall = upcoming_forecast.groupby("date")["precipitation"].sum().reset_index()
+
+        # Extract forecasted dates and rainfall
+        forecasted_dates = forecasted_rainfall["date"]
+        forecasted_rainfall_values = forecasted_rainfall["precipitation"]
+
+        # Create Forecasted Rainfall Chart
+        forecast_rain_chart = go.Figure()
+        forecast_rain_chart.add_trace(go.Scatter(
+            x=forecasted_dates, y=forecasted_rainfall_values,
+            mode='lines+markers', fill='tozeroy',
+            name='Forecasted Rainfall (mm)', line=dict(color='blue')
+        ))
+
+        # Add horizontal lines for rainfall levels
+        forecast_rain_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
+        forecast_rain_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
+        forecast_rain_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
+
+        # Update layout
+        forecast_rain_chart.update_layout(
+            xaxis_title="Date", yaxis_title="Rainfall (mm)",
+            template="plotly_white", xaxis=dict(tickangle=45)
+        )
+
+        # Display the chart
+        st.plotly_chart(forecast_rain_chart, use_container_width=True)
+    else:
+        st.warning("No forecasted weather data available for upcoming days!")
+
+# Detailed Tomorrow's Weather Forecast in Grid Format
+if "forecast_weather" in locals() and not forecast_weather.empty:
+    st.subheader("Detailed Tomorrow's Weather Forecast")
+
+    # Step 1: Calculate tomorrow's date
+    tomorrow_date = pd.Timestamp.now().date() + pd.Timedelta(days=1)
+
+    # Step 2: Ensure 'time' column is datetime and filter for tomorrow
+    forecast_weather["time"] = pd.to_datetime(forecast_weather["time"], errors="coerce")
+    tomorrow_data = forecast_weather[forecast_weather["time"].dt.date == tomorrow_date]
+
+    if not tomorrow_data.empty:
+        # Step 3: Sort data by time
+        tomorrow_data = tomorrow_data.sort_values(by="time")
+
+        # Step 4: Prepare data for display
+        display_data = pd.DataFrame({
+            "Time": tomorrow_data["time"].dt.strftime('%H:%M'),
+            "Temperature (°C)": tomorrow_data["temperature"],
+            "Feels Like (°C)": tomorrow_data["feels_like"],
+            "Precipitation (mm)": tomorrow_data["precipitation"],
+            "Humidity (%)": tomorrow_data["humidity"],
+            "Wind Speed (km/h)": tomorrow_data["wind_speed"]
+        })
+
+        # Step 5: Display in a grid format
+        st.dataframe(display_data, use_container_width=True)
+
+    else:
+        st.warning("No forecast data available for tomorrow!")
+else:
+    st.warning("Forecast weather table is empty or unavailable!")
+
+# Historical Precipitation Chart with Continuous Date Range
+if "historical_precipitation" in locals() and not historical_precipitation.empty:
+    st.subheader("Precipitation Trends Over the Last 7 Days")
+
+    try:
+        # Step 1: Ensure 'date' column is a datetime column
+        historical_precipitation["date"] = pd.to_datetime(historical_precipitation["date"], errors="coerce")
+
+        # Step 2: Calculate today and determine the last valid date in the table
+        today = pd.Timestamp.now().date()
+        max_date = historical_precipitation["date"].max().date()
+
+        # Step 3: Dynamically calculate the range (up to 7 complete days)
+        end_date = min(max_date, today - pd.Timedelta(days=1))  # Use the most recent complete day
+        start_date = max(end_date - pd.Timedelta(days=6), historical_precipitation["date"].min().date())  # Adjust for available data
+
+        # Step 4: Generate full date range and merge with existing data
+        date_range = pd.date_range(start=start_date, end=end_date)
+        full_data = pd.DataFrame({"date": date_range})
+        merged_data = full_data.merge(
+            historical_precipitation[["date", "precipitation"]],
+            on="date", how="left"
+        ).fillna({"precipitation": 0})  # Fill missing precipitation values with 0
+
+        # Step 5: Extract data for the chart
+        dates = merged_data["date"].dt.strftime('%Y-%m-%d')
+        daily_precipitation = merged_data["precipitation"]
+
+        # Step 6: Create the chart
+        historical_chart = go.Figure()
+        historical_chart.add_trace(go.Scatter(
+            x=dates, y=daily_precipitation,
+            mode='lines+markers', fill='tozeroy',
+            name='Daily Precipitation (mm)'
+        ))
+        # Add horizontal lines for rainfall levels
+        historical_chart.add_hline(y=1, line_dash="dash", annotation_text="Light Rain", line_color="blue")
+        historical_chart.add_hline(y=5, line_dash="dash", annotation_text="Moderate Rain", line_color="orange")
+        historical_chart.add_hline(y=10, line_dash="dash", annotation_text="Heavy Rain", line_color="red")
+
+        # Step 7: Update chart layout
+        historical_chart.update_layout(
+            title=f"Precipitation Trends ({start_date} to {end_date})",
+            xaxis_title="Date",
+            yaxis_title="Precipitation (mm)",
+            template="plotly_white",
+            xaxis=dict(type='category')  # Ensure dates appear cleanly on x-axis
+        )
+
+        # Step 8: Display the chart
+        st.plotly_chart(historical_chart, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error processing precipitation trends data: {e}")
+else:
+    st.warning("No data available in the 'precipitation_trends' table!")
 
 
-# Display the map
 
-# Display tomorrow's forecast in a grid
-st.subheader(f"Tomorrow's Weather Forecast ({next_day_forecast['date']})")
-st.dataframe({
-    "Time": times_tomorrow,
-    "Temperature (°C)": temperatures_tomorrow,
-    "Feels Like (°C)": feels_like_tomorrow,
-    "Precipitation (mm)": precipitation,
-    "Humidity (%)": humidity,
-    "Wind Speed (km/h)": wind_speed
-}, use_container_width=True)
+# Tunnel Precipitation Map with Dark Blue for "No Rain"
+if "tunnel_data" in locals() and not tunnel_data.empty:
+    st.subheader("Tunnel Precipitation Map")
 
-with col5:
-    st.plotly_chart(hum_chart, use_container_width=True)
-    st.plotly_chart(forecast_rain_chart, use_container_width=True)
+    try:
+        # Step 1: Ensure 'created_at' column is a datetime column
+        tunnel_data["created_at"] = pd.to_datetime(tunnel_data["created_at"], errors="coerce")
 
-    ##historical_chart all alone in one grid
+        # Step 2: Check today's data
+        today = pd.Timestamp.now().date()
+        today_data = tunnel_data[tunnel_data["created_at"].dt.date == today]
 
+        # Step 3: Merge today's data with all tunnels
+        all_tunnels = tunnel_data.drop_duplicates(subset=["latitude", "longitude", "location_name"])[
+            ["latitude", "longitude", "location_name"]
+        ]
+        merged_data = all_tunnels.merge(
+            today_data[["latitude", "longitude", "precipitation_intensity", "precipitation_description"]],
+            on=["latitude", "longitude"], how="left"
+        )
+        merged_data["precipitation_intensity"] = merged_data["precipitation_intensity"].fillna(0)
+        merged_data["precipitation_description"] = merged_data["precipitation_description"].fillna("No precipitation")
 
+        # Step 4: Assign colors based on precipitation thresholds
+        def assign_color(precipitation_intensity):
+            if precipitation_intensity > 10:
+                return "red"
+            elif precipitation_intensity > 5:
+                return "orange"
+            elif precipitation_intensity > 1:
+                return "bec404"
+            else:
+                return "#044ec4"
 
-# Display the forecasted rainfall chart below
-st.plotly_chart(historical_chart, use_container_width=True)
-# Streamlit layout
-st.title("Tunnel Precipitation Map")
-st.plotly_chart(fig)
+        merged_data["color"] = merged_data["precipitation_intensity"].apply(assign_color)
+
+        # Step 5: Create filter controls with colored dots
+        col1, col2 = st.columns([4, 1])
+        with col2:
+            st.markdown("### Filter Options")
+            show_red = st.checkbox(f"🔴 Heavy Rain (> 10 mm)", value=True)
+            show_orange = st.checkbox(f"🟠 Moderate Rain (5 - 10 mm)", value=True)
+            show_yellow = st.checkbox(f"🟡 Light Rain (1 - 5 mm)", value=True)
+            show_blue = st.checkbox(f"🔵 No Rain (< 1 mm)", value=True)
+
+        # Step 6: Apply filters
+        colors_to_show = []
+        if show_red:
+            colors_to_show.append("red")
+        if show_orange:
+            colors_to_show.append("orange")
+        if show_yellow:
+            colors_to_show.append("bec404")
+        if show_blue:
+            colors_to_show.append("#044ec4")  # Dark blue
+
+        filtered_data = merged_data[merged_data["color"].isin(colors_to_show)]
+
+        # Step 7: Create the Mapbox scatter plot
+        fig = px.scatter_mapbox(
+            filtered_data,
+            lat="latitude",
+            lon="longitude",
+            hover_name="location_name",
+            hover_data=["precipitation_description", "precipitation_intensity"],
+            color="color",
+            title="Precipitation at Tunnels (Filtered)",
+            zoom=10,
+            color_discrete_map={
+                "red": "red",
+                "orange": "orange",
+                "bec404": "bec404",
+                "#044ec4": "#044ec4"
+            }
+        )
+
+        fig.update_layout(showlegend=False)
+
+        # Step 8: Add annotations for Heavy Rain
+        for index, row in filtered_data.iterrows():
+            if row["precipitation_intensity"] > 10:
+                fig.add_annotation(
+                    x=row["longitude"],
+                    y=row["latitude"],
+                    text="⚠ Heavy Rain",
+                    showarrow=False,
+                    font=dict(size=12, color="red"),
+                    bgcolor="white",
+                    opacity=0.8
+                )
+
+        # Step 9: Display the map and filter controls
+        with col1:
+            fig.update_layout(mapbox_style="open-street-map", height=600)
+            st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Error processing tunnel precipitation data: {e}")
+
+else:
+    st.warning("No data available in the 'tunnel_data' table!")
 
