@@ -1,0 +1,12 @@
+[32m2024-12-19 16:17:53 +0100[0m - dagster - [34mDEBUG[0m - email_pipeline - 8273a0ab-f558-49f9-886f-900965afce9c - 10969 - LOGS_CAPTURED - Started capturing logs in process (pid: 10969).
+[32m2024-12-19 16:17:53 +0100[0m - dagster - [34mDEBUG[0m - email_pipeline - 8273a0ab-f558-49f9-886f-900965afce9c - 10969 - send_email_with_yagmail - STEP_START - Started execution of step "send_email_with_yagmail".
+/Users/erendestan/Documents/DDBL/Projects/InnolabsRainmaker/email_pipeline.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  upcoming_forecast["date"] = upcoming_forecast["time"].dt.date
+[32m2024-12-19 16:17:54 +0100[0m - dagster - [34mDEBUG[0m - email_pipeline - 8273a0ab-f558-49f9-886f-900965afce9c - 10969 - send_email_with_yagmail - STEP_OUTPUT - Yielded output "result" of type "Any". (Type check passed).
+[32m2024-12-19 16:17:54 +0100[0m - dagster - [34mDEBUG[0m - email_pipeline - 8273a0ab-f558-49f9-886f-900965afce9c - send_email_with_yagmail - Writing file at: /Users/erendestan/Documents/DDBL/Projects/InnolabsRainmaker/tmpiczylitz/storage/8273a0ab-f558-49f9-886f-900965afce9c/send_email_with_yagmail/result using PickledObjectFilesystemIOManager...
+[32m2024-12-19 16:17:54 +0100[0m - dagster - [34mDEBUG[0m - email_pipeline - 8273a0ab-f558-49f9-886f-900965afce9c - 10969 - send_email_with_yagmail - HANDLED_OUTPUT - Handled output "result" using IO manager "io_manager"
+[32m2024-12-19 16:17:54 +0100[0m - dagster - [34mDEBUG[0m - email_pipeline - 8273a0ab-f558-49f9-886f-900965afce9c - 10969 - send_email_with_yagmail - STEP_SUCCESS - Finished execution of step "send_email_with_yagmail" in 1.68s.
