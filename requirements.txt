@@ -4,3 +4,9 @@ requests
 python-dotenv
 meteoalertapi
 dagster
+supabase
+os
+pytz
+logging
+datetime
+requests
