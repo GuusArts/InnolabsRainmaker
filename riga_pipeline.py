@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 import pytz
 import logging
-from riga_pipeline import riga_repository
+
 
 # Load environment variables
 load_dotenv()
@@ -16,7 +16,7 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-location = 'Eindhoven'
+location = 'Riga'
 local_tz = pytz.timezone("Europe/Amsterdam")  # Amsterdam timezone
 
 # ------------------
@@ -24,7 +24,7 @@ local_tz = pytz.timezone("Europe/Amsterdam")  # Amsterdam timezone
 # ------------------
 
 # Weather operations
-@op
+@op(name="riga_fetch_weather_data")
 def fetch_weather_data():
     """Fetches weather data from the WeatherAPI."""
     url = f"http://api.weatherapi.com/v1/forecast.json?key={api_key}&q={location}&days=2"
@@ -32,7 +32,7 @@ def fetch_weather_data():
     response.raise_for_status()
     return response.json()
 
-@op
+@op(name="riga_store_weather_data")
 def store_weather_data(weather_data):
     """Inserts processed weather data into Supabase."""
     try:
@@ -66,7 +66,7 @@ def store_weather_data(weather_data):
         }
 
         # Insert into Supabase
-        response = supabase.table("weather_data").insert(processed_data).execute()
+        response = supabase.table("weather_data_baltic").insert(processed_data).execute()
 
         # Check if an error occurred during insertion
         if hasattr(response, 'error'): 
@@ -96,7 +96,8 @@ def store_weather_data(weather_data):
 #     ]
 #     return trends
 
-@op
+
+@op(name="riga_process_weather_trends")
 def process_weather_trends(weather_data):
     """Processes hourly trends for today's weather."""
     today = weather_data["forecast"]["forecastday"][0]["hour"]
@@ -119,12 +120,12 @@ def process_weather_trends(weather_data):
     return trends
 
 
-@op
+@op(name="riga_store_today_weather_trends")
 def store_today_weather_trends(trends):
     """Inserts hourly weather trends for today into Supabase."""
-    supabase.table("today_weather_trends").insert(trends).execute()
+    supabase.table("today_weather_trends_baltic").insert(trends).execute()
 
-@op
+@op(name="riga_process_forecast_data")
 def process_forecast_data(weather_data):
     """Processes hourly and daily forecasted data for upcoming days."""
     forecast = []
@@ -154,18 +155,18 @@ def process_forecast_data(weather_data):
     return forecast
 
 
-@op
+@op(name="riga_store_forecast_weather")
 def store_forecast_weather(forecast):
     """Inserts hourly forecasted data into Supabase."""
     try:
         # Insert forecast data into the forecast_weather table
-        supabase.table("forecast_weather").insert(forecast).execute()
+        supabase.table("forecast_weather_baltic").insert(forecast).execute()
         logging.info("Successfully inserted forecast weather data into Supabase")
     except Exception as e:
         logging.error(f"Error inserting forecast weather data: {e}")
         raise
 
-@op
+@op(name="riga_process_tomorrow_weather")
 def process_tomorrow_weather(weather_data):
     """Processes tomorrow's hourly weather forecast."""
     tomorrow = weather_data["forecast"]["forecastday"][1]["hour"]
@@ -183,12 +184,12 @@ def process_tomorrow_weather(weather_data):
     ]
     return forecast
 
-@op
+@op(name="riga_store_tomorrow_weather")
 def store_tomorrow_weather(forecast):
     """Inserts tomorrow's hourly weather data into Supabase."""
-    supabase.table("tomorrow_weather").insert(forecast).execute()
+    supabase.table("tomorrow_weather_baltic").insert(forecast).execute()
 
-@op
+@op(name="riga_fetch_historical_precipitation")
 def fetch_historical_precipitation():
     """Fetches historical precipitation data with Amsterdam timezone."""
     local_tz = pytz.timezone('Europe/Amsterdam')  # Define Amsterdam timezone
@@ -215,85 +216,19 @@ def fetch_historical_precipitation():
         "created_at": datetime.now(local_tz).isoformat()  # Timestamp in Amsterdam timezone
     } for date, precip in zip(dates, precipitation)]
 
-@op
+@op(name="riga_store_precipitation_trends")
 def store_precipitation_trends(trends):
     """Inserts precipitation trends into Supabase."""
-    supabase.table("precipitation_trends").insert(trends).execute()
+    supabase.table("precipitation_trends_baltic").insert(trends).execute()
 
 # Tunnel data operations
-@op
-def fetch_tunnel_data():
-    """Fetches tunnel data from the Eindhoven API."""
-    url = "https://data.eindhoven.nl/api/explore/v2.1/catalog/datasets/tunnelvisie-punten/records?limit=71"
-    response = requests.get(url)
-    response.raise_for_status()
-    return response.json().get("results", [])
-
-@op
-def process_tunnel_data(tunnels):
-    """Processes tunnel data and adds precipitation information."""
-    processed_tunnels = []
-    for tunnel in tunnels:
-        lat = float(tunnel["lat"])
-        lon = float(tunnel["lon"])
-        location_name = tunnel["locatienaam"]
-        
-        # Clean and parse the 'jaar' field
-        raw_year = tunnel.get("jaar", None)
-        try:
-            if isinstance(raw_year, str) and "/" in raw_year:
-                year = int(raw_year.split("/")[0])  # Take the first year in the range
-            else:
-                year = int(raw_year) if raw_year else None
-        except (ValueError, TypeError):
-            year = None  # Set to None if parsing fails
-
-        # Fetch precipitation data
-        precip_response = requests.get(f"https://gps.buienradar.nl/getrr.php?lat={lat}&lon={lon}")
-        precip_data = precip_response.text.strip()
-        precipitation_intensity = 0
-
-        for line in precip_data.splitlines():
-            parts = line.split("|")
-            if len(parts) == 2:
-                try:
-                    intensity = 10 ** ((int(parts[0]) - 109) / 32)
-                    precipitation_intensity = max(precipitation_intensity, intensity)
-                except ValueError:
-                    continue
-
-        precipitation_description = (
-            "No rain" if precipitation_intensity < 0.1 else
-            "Light rain" if precipitation_intensity <= 2.5 else
-            "Moderate rain" if precipitation_intensity <= 7.5 else
-            "Heavy rain"
-        )
-
-        processed_tunnels.append({
-            "location_name": location_name,
-            "year": year,  # Cleaned year value
-            "latitude": lat,
-            "longitude": lon,
-            "precipitation_description": precipitation_description,
-            "precipitation_intensity": precipitation_intensity,
-            "created_at": datetime.now(local_tz).isoformat(),  # Add Amsterdam timezone timestamp
-        })
-
-    return processed_tunnels
-
-
-@op
-def store_tunnel_data(processed_tunnels):
-    """Inserts processed tunnel data into Supabase."""
-    supabase.table("tunnel_data").insert(processed_tunnels).execute()
-    
 
 # ------------------
 # Jobs
 # ------------------
 
 @job
-def today_weather_trends_pipeline():
+def riga_today_weather_trends_pipeline():
     """Pipeline to process and store today's weather trends."""
     weather_data = fetch_weather_data()
     trends = process_weather_trends(weather_data)
@@ -301,44 +236,36 @@ def today_weather_trends_pipeline():
     store_today_weather_trends(trends)
 
 @job
-def forecast_weather_pipeline():
+def riga_forecast_weather_pipeline():
     """Pipeline to process and store forecasted rainfall trends."""
     weather_data = fetch_weather_data()
     forecast = process_forecast_data(weather_data)
     store_forecast_weather(forecast)
 
 @job
-def tomorrow_weather_pipeline():
+def riga_tomorrow_weather_pipeline():
     """Pipeline to process and store tomorrow's hourly weather forecast."""
     weather_data = fetch_weather_data()
     tomorrow_data = process_tomorrow_weather(weather_data)
     store_tomorrow_weather(tomorrow_data)
 
 @job
-def historical_precipitation_pipeline():
+def riga_historical_precipitation_pipeline():
     trends = fetch_historical_precipitation()
     store_precipitation_trends(trends)
 
 
-@job
-def tunnel_pipeline():
-    """Pipeline to process and store tunnel data."""
-    tunnels = fetch_tunnel_data()
-    processed_tunnels = process_tunnel_data(tunnels)
-    store_tunnel_data(processed_tunnels)
+
 
 # ------------------
 # Repository
 # ------------------
 
 @repository
-def data_pipeline_repository():
+def riga_repository():
     return [
-        today_weather_trends_pipeline,
-        forecast_weather_pipeline,
-        tomorrow_weather_pipeline,
-        historical_precipitation_pipeline,
-        tunnel_pipeline,
-    
+        riga_today_weather_trends_pipeline,
+        riga_forecast_weather_pipeline,
+        riga_tomorrow_weather_pipeline,
+        riga_historical_precipitation_pipeline,
     ]
-
