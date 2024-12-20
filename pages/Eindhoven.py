@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import date
 
-# Load environment variables
+
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
