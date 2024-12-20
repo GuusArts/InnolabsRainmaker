@@ -1,0 +1,3 @@
+[runner]
+# Set Eindhoven.py as the main entry point
+program = "Eindhoven.py"
