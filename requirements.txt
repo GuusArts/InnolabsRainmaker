@@ -1,5 +1,6 @@
 streamlit
 plotly
+pandas
 requests
 python-dotenv
 meteoalertapi
@@ -8,3 +9,4 @@ supabase
 pytz
 logging
 datetime
+yagmail
